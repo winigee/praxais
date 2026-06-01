@@ -37,6 +37,12 @@ function mirrorEntry(entry) {
 const PORT = process.env.PORT || 4317;
 const WEB_DIR = path.join(__dirname, '..', 'web');
 
+// Settings persisted in the _meta bag. thewatcherUrl is shared with the Time tab.
+const SETTINGS_DEFAULTS = {
+  firmName: '', firmAddress: '', firmEmail: '', firmPhone: '',
+  defaultModel: '', defaultProtect: true, thewatcherUrl: '',
+};
+
 // --- helpers ----------------------------------------------------------------
 function sendJson(res, status, obj) {
   const body = JSON.stringify(obj);
@@ -256,6 +262,21 @@ async function api(req, res, pathname, query) {
     if (!u) return sendJson(res, 400, { error: 'unknown user' });
     db.setSetting('currentUserId', u.id);
     return sendJson(res, 200, u);
+  }
+
+  // Settings — firm profile + app preferences (stored in the _meta bag).
+  if (r[0] === 'settings') {
+    if (method === 'GET') {
+      const out = {}; for (const k of Object.keys(SETTINGS_DEFAULTS)) out[k] = db.getSetting(k, SETTINGS_DEFAULTS[k]);
+      return sendJson(res, 200, { settings: out, ai: { available: bones.available(), models: bones.MODELS } });
+    }
+    if (method === 'POST') {
+      const b = await readBody(req);
+      for (const k of Object.keys(SETTINGS_DEFAULTS)) if (k in b) db.setSetting(k, b[k]);
+      db.logActivity({ actor: access.currentUser()?.name || 'user', action: 'updated-settings' });
+      const out = {}; for (const k of Object.keys(SETTINGS_DEFAULTS)) out[k] = db.getSetting(k, SETTINGS_DEFAULTS[k]);
+      return sendJson(res, 200, { settings: out });
+    }
   }
 
   // Global search — scoped to matters the acting user may see.

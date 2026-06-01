@@ -439,6 +439,59 @@ views.activity = async () => {
     ])) : el('div', { class: 'empty' }, 'No activity.')));
 };
 
+views.settings = async () => {
+  const { settings: s, ai } = await api.get('/settings');
+  const me = await api.get('/me').catch(() => null);
+
+  const firmName = el('input', { value: s.firmName || '', placeholder: 'Firm name' });
+  const firmEmail = el('input', { value: s.firmEmail || '', placeholder: 'Contact email' });
+  const firmPhone = el('input', { value: s.firmPhone || '', placeholder: 'Phone' });
+  const firmAddress = el('textarea', { rows: '2', placeholder: 'Address (used on letterhead)' }); firmAddress.value = s.firmAddress || '';
+
+  const modelSel = el('select', {}, el('option', { value: '' }, 'Server default'),
+    ...Object.entries(ai.models || {}).map(([k, v]) => el('option', { value: k, selected: s.defaultModel === k ? '' : null }, `${k} · ${v}`)));
+  const protect = el('input', { type: 'checkbox' }); protect.checked = s.defaultProtect !== false;
+  const watcher = el('input', { value: s.thewatcherUrl || '', placeholder: 'http://localhost:4400' });
+
+  const save = el('button', { class: 'btn primary' }, 'Save settings');
+  save.addEventListener('click', async () => {
+    save.disabled = true;
+    try {
+      await api.post('/settings', {
+        firmName: firmName.value, firmEmail: firmEmail.value, firmPhone: firmPhone.value, firmAddress: firmAddress.value,
+        defaultModel: modelSel.value, defaultProtect: protect.checked, thewatcherUrl: watcher.value,
+      });
+      await loadSettings();
+      toast('Settings saved.');
+    } catch (e) { toast('Error: ' + e.message); }
+    save.disabled = false;
+  });
+
+  const firmCard = el('div', { class: 'card' }, el('h3', {}, 'Firm profile'),
+    el('p', { class: 'muted', style: 'font-size:13px' }, 'Identifies your firm; will feed document letterhead and invoices.'),
+    el('label', { class: 'field' }, el('span', {}, 'Firm name'), firmName),
+    el('div', { class: 'grid-2' }, el('label', { class: 'field' }, el('span', {}, 'Email'), firmEmail), el('label', { class: 'field' }, el('span', {}, 'Phone'), firmPhone)),
+    el('label', { class: 'field' }, el('span', {}, 'Address'), firmAddress));
+
+  const aiCard = el('div', { class: 'card' }, el('h3', {}, 'AI / BonesAI engine'),
+    el('div', { style: 'margin-bottom:8px' }, 'Status: ', el('span', { class: 'badge ' + (ai.available ? 'open' : 'high') }, ai.available ? 'online' : 'offline (set ANTHROPIC_API_KEY)')),
+    el('label', { class: 'field' }, el('span', {}, 'Default model'), modelSel),
+    el('label', { class: 'protect-toggle', style: 'margin-top:8px' }, protect, ' 🛡 De-identify by default (Protect on)'));
+
+  const intCard = el('div', { class: 'card' }, el('h3', {}, 'Integrations'),
+    el('label', { class: 'field' }, el('span', {}, 'TheWatcher URL (timekeeper)'), watcher),
+    el('p', { class: 'muted', style: 'font-size:12px' }, 'Shared with the Time tab. Leave blank to run on local time entries.'));
+
+  const acctCard = el('div', { class: 'card' }, el('h3', {}, 'Account'),
+    el('div', {}, 'Acting as: ', el('strong', {}, me ? `${me.name} (${me.role})` : '—')),
+    el('p', { class: 'muted', style: 'font-size:12px' }, 'Switch users from the header. Real login & user management are on the roadmap.'));
+
+  return el('div', {}, el('h2', {}, '⚙️ Settings'),
+    el('div', { class: 'grid-2' }, firmCard, aiCard),
+    el('div', { class: 'grid-2' }, intCard, acctCard),
+    el('div', { class: 'btn-row', style: 'margin-top:8px' }, save));
+};
+
 // --- shared UI helpers ------------------------------------------------------
 function table(headers, rows) {
   const thead = el('thead', {}, el('tr', {}, ...headers.map((h) => el('th', {}, h))));
@@ -584,7 +637,7 @@ async function sendChat(e) {
   node.append(el('span', { class: 'spinner' }));
 
   try {
-    const resp = await fetch('/api/ai/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ matterId: state.assistantMatter, messages: state.chat, protect }) });
+    const resp = await fetch('/api/ai/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ matterId: state.assistantMatter, messages: state.chat, protect, model: state.settings?.defaultModel || undefined }) });
     const reader = resp.body.getReader();
     const dec = new TextDecoder();
     let buf = '', acc = '', first = true;
@@ -610,7 +663,7 @@ async function sendChat(e) {
 // --- shell ------------------------------------------------------------------
 function setNav() {
   document.querySelectorAll('.nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.view === state.view));
-  $('#crumb').textContent = { dashboard: 'Dashboard', matters: 'Matters', drafting: 'Drafting', docket: 'Docket & Deadlines', calendar: 'Calendar', intake: 'Intake', conflicts: 'Conflict Check', time: 'Time & Billing', activity: 'Activity' }[state.view] || state.view;
+  $('#crumb').textContent = { dashboard: 'Dashboard', matters: 'Matters', drafting: 'Drafting', docket: 'Docket & Deadlines', calendar: 'Calendar', intake: 'Intake', conflicts: 'Conflict Check', time: 'Time & Billing', activity: 'Activity', settings: 'Settings' }[state.view] || state.view;
 }
 async function render() {
   if (state._tick) { clearInterval(state._tick); state._tick = null; }
@@ -640,6 +693,16 @@ async function initUserSwitch() {
       render();
     };
   } catch (_) { sel.style.display = 'none'; }
+}
+
+// --- settings (loaded once; supplies UI defaults) --------------------------
+async function loadSettings() {
+  try {
+    const { settings } = await api.get('/settings');
+    state.settings = settings;
+    const pt = $('#protect-toggle');
+    if (pt) pt.checked = settings.defaultProtect !== false;
+  } catch (_) { state.settings = {}; }
 }
 
 // --- global search ----------------------------------------------------------
@@ -682,6 +745,7 @@ async function init() {
   $('#chat-input').addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') sendChat(e); });
   initSearch();
   await initUserSwitch();
+  await loadSettings();
 
   try {
     const s = await api.get('/ai/status');
