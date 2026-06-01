@@ -13,6 +13,7 @@ const agents = require('./ai/agents');
 const bones = require('./ai/bones');
 const watcher = require('./integrations/thewatcher');
 const access = require('./access');
+const conflicts = require('./conflicts');
 
 // Resolve TheWatcher's URL: runtime setting wins, then env, then unset.
 function watcherUrl() {
@@ -229,6 +230,12 @@ async function api(req, res, pathname, query) {
 
   // Global search — scoped to matters the acting user may see.
   if (r[0] === 'search' && method === 'GET') return sendJson(res, 200, search(query.q || ''));
+
+  // Conflict check — firm-wide sweep, access-aware results.
+  if (r[0] === 'conflicts' && r[1] === 'check' && method === 'POST') {
+    const b = await readBody(req);
+    return sendJson(res, 200, conflicts.check(b.names || b.name || [], access.currentUser()));
+  }
 
   // Clients
   if (r[0] === 'clients') {

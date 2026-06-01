@@ -258,6 +258,53 @@ function renderTriage(container, item) {
   ));
 }
 
+views.conflicts = async () => {
+  const names = el('textarea', { rows: '4', placeholder: 'Prospective client and adverse party names — one per line.\ne.g.\nMeridian Property Holdings\nJohn Carter' });
+  const runBtn = el('button', { class: 'btn primary' }, 'Run conflict check');
+  const out = el('div', { id: 'conflict-out' });
+
+  runBtn.addEventListener('click', async () => {
+    const list = names.value.split('\n').map((s) => s.trim()).filter(Boolean);
+    if (!list.length) return toast('Enter at least one name.');
+    runBtn.disabled = true; out.innerHTML = ''; out.append(el('span', { class: 'spinner' }), ' Checking the firm index…');
+    try {
+      const res = await api.post('/conflicts/check', { names: list });
+      out.innerHTML = '';
+      out.append(renderConflictReport(res));
+    } catch (e) { out.textContent = 'Error: ' + e.message; }
+    runBtn.disabled = false;
+  });
+
+  const form = el('div', { class: 'card' },
+    el('h3', {}, 'New-business conflict check'),
+    el('p', { class: 'muted', style: 'font-size:13px' }, 'Sweeps every client and matter party across the whole firm. A clash inside a matter you can’t access is confirmed but its details are withheld — escalate to the responsible attorney.'),
+    el('label', { class: 'field' }, el('span', {}, 'Names to vet'), names),
+    el('div', { class: 'btn-row' }, runBtn), out,
+  );
+  return el('div', {}, el('h2', {}, '⚔️ Conflict Check'), el('div', { class: 'grid-2' }, form, el('div', { class: 'card' }, el('h3', {}, 'How it works'),
+    el('p', { class: 'muted', style: 'font-size:13px;line-height:1.6' }, 'Enter the prospective client plus any opposing parties. Praixis flags where a name already appears — as an existing client (acting against them may be a conflict) or as a party in a live matter. Strong matches are exact/contained names; possible matches share a distinctive name part and warrant a human look.'))));
+};
+
+function renderConflictReport(res) {
+  if (res.clear) {
+    return el('div', { class: 'card', style: 'background:var(--panel-2);border-color:var(--accent-dim);margin-top:12px' },
+      el('div', { style: 'font-size:15px;color:var(--ok);font-weight:600' }, '✓ No conflicts found'),
+      el('div', { class: 'muted', style: 'font-size:13px;margin-top:4px' }, `Checked ${res.query.length} name(s) against the firm index.`));
+  }
+  const rows = res.matches.map((m) => {
+    const strongBadge = el('span', { class: `badge ${m.strength === 'strong' ? 'high' : 'warn'}` }, m.strength);
+    const where = m.restricted
+      ? el('span', { class: 'muted' }, `in a restricted matter — escalate to ${m.responsible || 'a partner'}`)
+      : el('span', {}, m.kind === 'client' ? 'existing client' : `party [${m.role || 'party'}]`, m.matterRef ? el('span', { class: 'muted' }, ` · ${m.matterRef}${m.matterTitle ? ' — ' + m.matterTitle : ''}`) : null);
+    return [el('strong', {}, m.against), el('span', { class: 'muted' }, `matched “${m.query}”`), strongBadge, where];
+  });
+  return el('div', { style: 'margin-top:12px' },
+    el('div', { class: 'card', style: 'background:var(--panel-2);border-color:var(--danger)' },
+      el('div', { style: 'font-size:15px;color:var(--danger);font-weight:600' }, `⚠ ${res.matches.length} potential conflict(s)`),
+      el('div', { class: 'muted', style: 'font-size:13px;margin-top:4px' }, 'Review before opening the matter.')),
+    table(['Name on file', 'Matched', 'Strength', 'Appears as'], rows));
+}
+
 views.time = async () => {
   const [st, cfg, matters] = await Promise.all([api.get('/watcher/status'), api.get('/watcher/config'), api.get('/matters')]);
 
@@ -484,7 +531,7 @@ async function sendChat(e) {
 // --- shell ------------------------------------------------------------------
 function setNav() {
   document.querySelectorAll('.nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.view === state.view));
-  $('#crumb').textContent = { dashboard: 'Dashboard', matters: 'Matters', drafting: 'Drafting', docket: 'Docket & Deadlines', intake: 'Intake', time: 'Time & Billing', activity: 'Activity' }[state.view] || state.view;
+  $('#crumb').textContent = { dashboard: 'Dashboard', matters: 'Matters', drafting: 'Drafting', docket: 'Docket & Deadlines', intake: 'Intake', conflicts: 'Conflict Check', time: 'Time & Billing', activity: 'Activity' }[state.view] || state.view;
 }
 async function render() {
   if (state._tick) { clearInterval(state._tick); state._tick = null; }

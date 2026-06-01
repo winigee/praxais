@@ -57,7 +57,8 @@ data/             db.json — gitignored, created at runtime
 - **Four agents** (`server/ai/agents.js`):
   - `agent:drafter` — drafts documents from matter context.
   - `agent:docket` — extracts dates/deadlines from text (computes relative ones).
-  - `agent:intake` — triages inbound messages; can convert to a matter.
+  - `agent:intake` — triages inbound messages; can convert to a matter. Its
+    conflict flag is a real firm-wide sweep (`server/conflicts.js`), not a guess.
   - the **assistant** — matter-aware chat, streamed over SSE.
 - **The privacy invariant (BonesAI):** when **Protect** is on, material is
   de-identified *before* it leaves for the model and the reply is re-identified

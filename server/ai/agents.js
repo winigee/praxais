@@ -7,6 +7,8 @@
 
 const bones = require('./bones');
 const db = require('../db');
+const conflicts = require('../conflicts');
+const access = require('../access');
 
 const USE_AI = () => bones.available();
 
@@ -242,14 +244,22 @@ async function triageIntake({ intakeId, protect = true }) {
     result = stubTriage(item, matters);
   }
 
+  // Real conflict sweep: scan the message for known firm clients/parties, and
+  // vet the sender's name. This overrides the model's heuristic guess.
+  const scan = conflicts.scanText(`${item.subject} ${item.body} ${item.fromName || ''}`, access.currentUser());
+  const byName = conflicts.check(item.fromName || item.from.split('@')[0], access.currentUser());
+  const conflictMatches = [...scan.matches, ...byName.matches];
+  const realConflict = conflictMatches.length > 0;
+
   const triage = {
     category: result.category || 'new-enquiry',
     practiceArea: result.practiceArea || '',
     summary: result.summary || '',
     urgency: ['high', 'normal', 'low'].includes(result.urgency) ? result.urgency : 'normal',
     suggestedMatterId: result.suggestedMatterId || null,
-    conflictFlag: !!result.conflictFlag,
-    conflictNote: result.conflictNote || '',
+    conflictFlag: realConflict || !!result.conflictFlag,
+    conflictNote: realConflict ? conflicts.summarize(conflictMatches) : (result.conflictNote || ''),
+    conflictMatches,
     draftReply: result.draftReply || '',
   };
   db.update('intake', intakeId, { status: 'triaged', triage });
