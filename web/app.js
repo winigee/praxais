@@ -840,6 +840,7 @@ async function init() {
   try {
     const s = await api.get('/ai/status');
     state.aiAvailable = s.available;
+    if (s.version) { const bv = $('#brand-version'); if (bv) bv.textContent = `v${s.version} · beta`; }
     const pill = $('#engine-pill');
     pill.textContent = s.available ? 'BonesAI: online' : 'BonesAI: offline';
     pill.classList.add(s.available ? 'online' : 'offline');

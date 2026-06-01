@@ -76,6 +76,9 @@ data/             db.json — gitignored, created at runtime
 - JSON-on-disk for storage (`db.js`). One object in memory, debounced flush.
 - Comments explain *why*, not *what*. Don't over-comment.
 - Tight, focused commits with intent-explaining messages.
+- **Versioning:** the app is BETA. Every build bumps `version` in `package.json`
+  and adds a `CHANGELOG.md` entry; the masthead shows `BETA · v<version>` (served
+  from `/api/version`).
 - Match the existing terse code idiom (small helpers, early returns).
 - Do **not** put the model identifier or internal session info in commits,
   code, or pushed artifacts.

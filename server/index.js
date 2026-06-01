@@ -14,6 +14,7 @@ const bones = require('./ai/bones');
 const watcher = require('./integrations/thewatcher');
 const access = require('./access');
 const conflicts = require('./conflicts');
+const pkg = require('../package.json');
 
 // Resolve TheWatcher's URL: runtime setting wins, then env, then unset.
 function watcherUrl() {
@@ -251,8 +252,9 @@ async function api(req, res, pathname, query) {
 
   // GET /api/state
   if (r[0] === 'state' && method === 'GET') return sendJson(res, 200, buildState());
+  if (r[0] === 'version' && method === 'GET') return sendJson(res, 200, { version: pkg.version, channel: 'beta', name: pkg.productName || 'Praixis' });
   if (r[0] === 'ai' && r[1] === 'status' && method === 'GET')
-    return sendJson(res, 200, { available: bones.available(), templates: agents.DRAFT_TEMPLATES, models: bones.MODELS });
+    return sendJson(res, 200, { available: bones.available(), version: pkg.version, channel: 'beta', templates: agents.DRAFT_TEMPLATES, models: bones.MODELS });
 
   // Users + "acting as" session (stand-in for login until accounts land)
   if (r[0] === 'users') {
@@ -543,7 +545,7 @@ const server = http.createServer((req, res) => {
 db.load();
 seed();
 server.listen(PORT, () => {
-  console.log(`\n  Praixis — AI practice management suite`);
+  console.log(`\n  Praixis — AI practice management suite  (BETA v${pkg.version})`);
   console.log(`  http://localhost:${PORT}`);
   console.log(`  BonesAI engine: ${bones.available() ? 'ONLINE (Anthropic key detected)' : 'OFFLINE (set ANTHROPIC_API_KEY for live agents)'}`);
   console.log(`  TheWatcher:     ${watcherUrl() ? watcherUrl() + ' (configured)' : 'not configured (set THEWATCHER_URL or connect in the Time tab)'}\n`);
