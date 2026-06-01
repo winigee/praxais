@@ -82,8 +82,10 @@ data/             db.json — gitignored, created at runtime
 
 ## Known prototype limitations (intentional, not bugs)
 
-- Single-process JSON store, **no auth, no multi-user**. Move to SQLite/Postgres
-  + accounts before real use.
+- Single-process JSON store, and **no real login** yet — the acting user is a
+  header switcher, not authenticated. Users, roles, and per-matter access are
+  real (admin-managed in Settings); move to SQLite/Postgres + real auth before
+  production.
 - Drafting/docket take **pasted text**; PDF/DOCX ingest not wired in yet (the
   BonesAI desktop app has `pdf-parse` + `mammoth` to borrow from).
 - Intake is **simulated**; no live Gmail/Outlook yet.

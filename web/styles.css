@@ -136,6 +136,10 @@ pre.doc { white-space: pre-wrap; word-wrap: break-word; background: var(--bg); b
 .toast.show { transform: translateX(-50%) translateY(0); }
 
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 760px) { .settings-grid { grid-template-columns: 1fr; } }
+.access-row { display: block; padding: 6px 0; border-bottom: 1px solid var(--border); cursor: pointer; }
+.access-row:last-child { border-bottom: none; }
 @media (max-width: 900px) { #app { grid-template-columns: 64px 1fr; } .brand-name, .brand-sub, .nav-btn span { } .grid-2 { grid-template-columns: 1fr; } }
 
 /* Calendar */

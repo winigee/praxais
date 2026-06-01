@@ -130,9 +130,24 @@ function reset() {
   return db;
 }
 
+// Whole-database snapshot, for backup/export.
+function exportDb() { load(); return db; }
+
+// Replace the whole database from a snapshot (restore). Normalises shape so a
+// partial/old backup can't corrupt the store.
+function importDb(obj) {
+  if (!obj || typeof obj !== 'object') throw new Error('invalid backup');
+  const next = { _meta: obj._meta && typeof obj._meta === 'object' ? obj._meta : { seq: {} } };
+  if (!next._meta.seq) next._meta.seq = {};
+  for (const c of COLLECTIONS) next[c] = Array.isArray(obj[c]) ? obj[c] : [];
+  db = next;
+  flush();
+  return db;
+}
+
 module.exports = {
   COLLECTIONS, DATA_DIR, DB_FILE,
-  load, flush, reset, id,
+  load, flush, reset, id, exportDb, importDb,
   all, get, where, insert, update, remove, logActivity,
   getSetting, setSetting,
 };

@@ -41,6 +41,7 @@ const WEB_DIR = path.join(__dirname, '..', 'web');
 const SETTINGS_DEFAULTS = {
   firmName: '', firmAddress: '', firmEmail: '', firmPhone: '',
   defaultModel: '', defaultProtect: true, thewatcherUrl: '',
+  billingCurrency: 'USD', billingDefaultRate: 0, invoicePrefix: 'INV-', invoiceNextNumber: 1001,
 };
 
 // --- helpers ----------------------------------------------------------------
@@ -254,7 +255,35 @@ async function api(req, res, pathname, query) {
     return sendJson(res, 200, { available: bones.available(), templates: agents.DRAFT_TEMPLATES, models: bones.MODELS });
 
   // Users + "acting as" session (stand-in for login until accounts land)
-  if (r[0] === 'users' && method === 'GET') return sendJson(res, 200, db.all('users'));
+  if (r[0] === 'users') {
+    if (method === 'GET') return sendJson(res, 200, db.all('users'));
+    const me = access.currentUser();
+    if (!me || me.role !== 'admin') return sendJson(res, 403, { error: 'admin only' });
+    const ROLES = ['admin', 'attorney', 'staff'];
+    if (!r[1] && method === 'POST') {
+      const b = await readBody(req);
+      if (!b.name || !b.name.trim()) return sendJson(res, 400, { error: 'name required' });
+      const u = db.insert('users', { name: b.name.trim(), role: ROLES.includes(b.role) ? b.role : 'staff', title: b.title || '', email: b.email || '' });
+      return sendJson(res, 201, u);
+    }
+    if (r[1] && method === 'PATCH') {
+      const b = await readBody(req); const patch = {};
+      for (const k of ['name', 'title', 'email']) if (k in b) patch[k] = b[k];
+      if (b.role && ROLES.includes(b.role)) patch.role = b.role;
+      const u = db.update('users', r[1], patch);
+      return u ? sendJson(res, 200, u) : sendJson(res, 404, { error: 'not found' });
+    }
+    if (r[1] && method === 'DELETE') {
+      if (r[1] === me.id) return sendJson(res, 400, { error: 'you cannot delete yourself' });
+      const t = db.get('users', r[1]);
+      if (!t) return sendJson(res, 404, { error: 'not found' });
+      if (t.role === 'admin' && db.where('users', (u) => u.role === 'admin').length <= 1) return sendJson(res, 400, { error: 'cannot delete the last admin' });
+      db.remove('users', r[1]);
+      // Strip the departed user from every matter's access list.
+      for (const m of db.all('matters')) if (Array.isArray(m.access) && m.access.includes(r[1])) db.update('matters', m.id, { access: m.access.filter((x) => x !== r[1]) });
+      return sendJson(res, 200, { ok: true });
+    }
+  }
   if (r[0] === 'me' && method === 'GET') return sendJson(res, 200, access.currentUser());
   if (r[0] === 'session' && method === 'POST') {
     const b = await readBody(req);
@@ -262,6 +291,29 @@ async function api(req, res, pathname, query) {
     if (!u) return sendJson(res, 400, { error: 'unknown user' });
     db.setSetting('currentUserId', u.id);
     return sendJson(res, 200, u);
+  }
+
+  // Data backup / restore / reset — admin only.
+  if (['backup', 'restore', 'reset'].includes(r[0])) {
+    const me = access.currentUser();
+    if (me && me.role !== 'admin') return sendJson(res, 403, { error: 'admin only' });
+    if (r[0] === 'backup' && method === 'GET') {
+      const body = JSON.stringify(db.exportDb(), null, 2);
+      res.writeHead(200, { 'content-type': 'application/json', 'content-disposition': `attachment; filename="praixis-backup-${new Date().toISOString().slice(0, 10)}.json"` });
+      return res.end(body);
+    }
+    if (r[0] === 'restore' && method === 'POST') {
+      const b = await readBody(req);
+      try { db.importDb(b.snapshot || b); db.logActivity({ actor: me?.name || 'admin', action: 'restored-backup' }); return sendJson(res, 200, { ok: true }); }
+      catch (e) { return sendJson(res, 400, { error: e.message }); }
+    }
+    if (r[0] === 'reset' && method === 'POST') {
+      const b = await readBody(req);
+      db.reset();
+      if (b.mode !== 'empty') seed({ force: true });
+      db.logActivity({ actor: me?.name || 'admin', action: 'reset-data', detail: b.mode || 'seed' });
+      return sendJson(res, 200, { ok: true });
+    }
   }
 
   // Settings — firm profile + app preferences (stored in the _meta bag).

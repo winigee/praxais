@@ -122,7 +122,31 @@ async function matterDetail(id) {
     ])) : el('div', { class: 'empty' }, 'No deadlines.'),
   );
 
-  return el('div', {}, back, header, el('div', { class: 'row', style: 'margin-top:16px' }, docs, events));
+  // Access control: admins and the responsible attorney can set who sees this matter.
+  const canManage = state.me && (state.me.role === 'admin' || state.me.name === m.responsibleAttorney);
+  let accessCard = null;
+  if (canManage) {
+    const users = await api.get('/users');
+    const acl = new Set(m.access || []);
+    const rows = users.map((u) => {
+      const auto = u.name === m.responsibleAttorney || u.role === 'admin';
+      const cb = el('input', { type: 'checkbox' }); cb.checked = auto || acl.has(u.id); cb.disabled = auto ? '' : null;
+      cb.addEventListener('change', async () => {
+        const next = new Set(m.access || []);
+        if (cb.checked) next.add(u.id); else next.delete(u.id);
+        try { await api.patch('/matters/' + id, { access: [...next] }); m.access = [...next]; toast('Access updated.'); }
+        catch (e) { toast('Error: ' + e.message); cb.checked = !cb.checked; }
+      });
+      return el('label', { class: 'access-row' }, cb, ` ${u.name} `, el('span', { class: 'muted', style: 'font-size:12px' }, auto ? `(${u.role === 'admin' ? 'admin — always' : 'responsible — always'})` : u.title || u.role));
+    });
+    accessCard = el('div', { class: 'card grow' }, el('h3', {}, 'Who can access this matter'),
+      el('p', { class: 'muted', style: 'font-size:12px' }, 'Admins and the responsible attorney always have access. Tick others to grant it.'),
+      ...rows);
+  }
+
+  return el('div', {}, back, header,
+    el('div', { class: 'row', style: 'margin-top:16px' }, docs, events),
+    accessCard ? el('div', { class: 'row', style: 'margin-top:16px' }, accessCard) : null);
 }
 
 views.drafting = async () => {
@@ -452,6 +476,13 @@ views.settings = async () => {
     ...Object.entries(ai.models || {}).map(([k, v]) => el('option', { value: k, selected: s.defaultModel === k ? '' : null }, `${k} · ${v}`)));
   const protect = el('input', { type: 'checkbox' }); protect.checked = s.defaultProtect !== false;
   const watcher = el('input', { value: s.thewatcherUrl || '', placeholder: 'http://localhost:4400' });
+  // Billing defaults
+  const currency = el('select', {}, ...['USD', 'GBP', 'EUR', 'AUD', 'CAD'].map((c) => el('option', { value: c, selected: s.billingCurrency === c ? '' : null }, c)));
+  const defRate = el('input', { type: 'number', value: s.billingDefaultRate || 0 });
+  const invPrefix = el('input', { value: s.invoicePrefix || 'INV-' });
+  const invNext = el('input', { type: 'number', value: s.invoiceNextNumber || 1001 });
+
+  const isAdmin = me && me.role === 'admin';
 
   const save = el('button', { class: 'btn primary' }, 'Save settings');
   save.addEventListener('click', async () => {
@@ -460,6 +491,8 @@ views.settings = async () => {
       await api.post('/settings', {
         firmName: firmName.value, firmEmail: firmEmail.value, firmPhone: firmPhone.value, firmAddress: firmAddress.value,
         defaultModel: modelSel.value, defaultProtect: protect.checked, thewatcherUrl: watcher.value,
+        billingCurrency: currency.value, billingDefaultRate: Number(defRate.value) || 0,
+        invoicePrefix: invPrefix.value, invoiceNextNumber: Number(invNext.value) || 1001,
       });
       await loadSettings();
       toast('Settings saved.');
@@ -478,19 +511,74 @@ views.settings = async () => {
     el('label', { class: 'field' }, el('span', {}, 'Default model'), modelSel),
     el('label', { class: 'protect-toggle', style: 'margin-top:8px' }, protect, ' 🛡 De-identify by default (Protect on)'));
 
+  const billingCard = el('div', { class: 'card' }, el('h3', {}, 'Billing defaults'),
+    el('div', { class: 'grid-2' }, el('label', { class: 'field' }, el('span', {}, 'Currency'), currency), el('label', { class: 'field' }, el('span', {}, 'Default rate / hr'), defRate)),
+    el('div', { class: 'grid-2' }, el('label', { class: 'field' }, el('span', {}, 'Invoice prefix'), invPrefix), el('label', { class: 'field' }, el('span', {}, 'Next invoice #'), invNext)));
+
   const intCard = el('div', { class: 'card' }, el('h3', {}, 'Integrations'),
     el('label', { class: 'field' }, el('span', {}, 'TheWatcher URL (timekeeper)'), watcher),
     el('p', { class: 'muted', style: 'font-size:12px' }, 'Shared with the Time tab. Leave blank to run on local time entries.'));
 
   const acctCard = el('div', { class: 'card' }, el('h3', {}, 'Account'),
     el('div', {}, 'Acting as: ', el('strong', {}, me ? `${me.name} (${me.role})` : '—')),
-    el('p', { class: 'muted', style: 'font-size:12px' }, 'Switch users from the header. Real login & user management are on the roadmap.'));
+    el('p', { class: 'muted', style: 'font-size:12px' }, isAdmin ? 'You are an administrator — you can manage users and firm data below.' : 'Switch users from the header. User management is admin-only.'));
+
+  const cards = [firmCard, aiCard, billingCard, intCard, acctCard];
+  if (isAdmin) cards.push(await usersCard(me), dataCard());
 
   return el('div', {}, el('h2', {}, '⚙️ Settings'),
-    el('div', { class: 'grid-2' }, firmCard, aiCard),
-    el('div', { class: 'grid-2' }, intCard, acctCard),
-    el('div', { class: 'btn-row', style: 'margin-top:8px' }, save));
+    el('div', { class: 'btn-row', style: 'margin-bottom:12px' }, save),
+    el('div', { class: 'settings-grid' }, ...cards));
 };
+
+async function usersCard(me) {
+  const users = await api.get('/users');
+  const ROLES = ['admin', 'attorney', 'staff'];
+  const rows = users.map((u) => [
+    el('div', {}, el('strong', {}, u.name), el('div', { class: 'muted', style: 'font-size:12px' }, `${u.title || ''} ${u.email ? '· ' + u.email : ''}`)),
+    (() => { const sel = el('select', {}, ...ROLES.map((r) => el('option', { value: r, selected: u.role === r ? '' : null }, r)));
+      sel.addEventListener('change', async () => { try { await api.patch('/users/' + u.id, { role: sel.value }); toast('Role updated.'); } catch (e) { toast('Error: ' + e.message); } }); return sel; })(),
+    el('button', { class: 'btn danger', onclick: async () => { if (u.id === me.id) return toast('You cannot delete yourself.'); if (!confirm(`Remove ${u.name}?`)) return; try { await api.del('/users/' + u.id); toast('User removed.'); render(); } catch (e) { toast('Error: ' + e.message); } } }, '🗑'),
+  ]);
+  const nName = el('input', { placeholder: 'Full name' });
+  const nRole = el('select', {}, ...ROLES.map((r) => el('option', { value: r }, r)));
+  const nTitle = el('input', { placeholder: 'Title' });
+  const nEmail = el('input', { placeholder: 'Email' });
+  const add = el('button', { class: 'btn primary' }, '+ Add user');
+  add.addEventListener('click', async () => {
+    if (!nName.value.trim()) return toast('Name required.');
+    try { await api.post('/users', { name: nName.value, role: nRole.value, title: nTitle.value, email: nEmail.value }); toast('User added.'); render(); }
+    catch (e) { toast('Error: ' + e.message); }
+  });
+  return el('div', { class: 'card', style: 'grid-column:1/-1' }, el('h3', {}, 'User management'),
+    el('p', { class: 'muted', style: 'font-size:13px' }, 'Firm staff and their roles. Admins see every matter; attorneys/staff see only matters they’re on (set access on each matter’s page).'),
+    table(['Name', 'Role', ''], rows),
+    el('div', { class: 'row', style: 'margin-top:12px;align-items:flex-end;flex-wrap:wrap' },
+      el('label', { class: 'field', style: 'margin:0' }, el('span', {}, 'Name'), nName),
+      el('label', { class: 'field', style: 'margin:0' }, el('span', {}, 'Role'), nRole),
+      el('label', { class: 'field', style: 'margin:0' }, el('span', {}, 'Title'), nTitle),
+      el('label', { class: 'field', style: 'margin:0' }, el('span', {}, 'Email'), nEmail),
+      add));
+}
+
+function dataCard() {
+  const file = el('input', { type: 'file', accept: 'application/json', style: 'display:none' });
+  file.addEventListener('change', async () => {
+    const f = file.files[0]; if (!f) return;
+    if (!confirm('Restore will REPLACE all current data with the backup. Continue?')) { file.value = ''; return; }
+    try { const snapshot = JSON.parse(await f.text()); await api.post('/restore', { snapshot }); toast('Backup restored.'); render(); }
+    catch (e) { toast('Restore failed: ' + e.message); }
+    file.value = '';
+  });
+  return el('div', { class: 'card', style: 'grid-column:1/-1' }, el('h3', {}, 'Data — backup & reset'),
+    el('p', { class: 'muted', style: 'font-size:13px' }, 'Download a full snapshot, restore from one, or reset the demo. Resets and restores replace everything — there is no undo.'),
+    el('div', { class: 'btn-row' },
+      el('a', { class: 'btn primary', href: '/api/backup', download: '' }, '⬇ Export backup'),
+      el('button', { class: 'btn', onclick: () => file.click() }, '⬆ Restore from file'),
+      el('button', { class: 'btn', onclick: async () => { if (!confirm('Reset to fresh demo data? This wipes current data.')) return; await api.post('/reset', { mode: 'seed' }); toast('Reset to demo data.'); render(); } }, '↻ Reset to demo'),
+      el('button', { class: 'btn danger', onclick: async () => { if (!confirm('Erase ALL data to an empty firm? This cannot be undone.')) return; await api.post('/reset', { mode: 'empty' }); toast('All data erased.'); render(); } }, '⚠ Erase all'),
+      file));
+}
 
 // --- shared UI helpers ------------------------------------------------------
 function table(headers, rows) {
@@ -683,10 +771,12 @@ async function initUserSwitch() {
   const sel = $('#user-switch');
   try {
     const [users, me] = await Promise.all([api.get('/users'), api.get('/me')]);
+    state.me = me;
     sel.innerHTML = '';
     for (const u of users) sel.append(el('option', { value: u.id, selected: me && u.id === me.id ? '' : null }, `${u.name} · ${u.title || u.role}`));
     sel.onchange = async () => {
       await api.post('/session', { userId: sel.value });
+      state.me = users.find((u) => u.id === sel.value) || state.me;
       state.matterId = null; setAssistantContext(null); state.chat = [];
       const name = sel.options[sel.selectedIndex].textContent.split(' · ')[0];
       toast(`Now acting as ${name}`);
