@@ -79,6 +79,10 @@ data/             db.json — gitignored, created at runtime
 - **Versioning:** the app is BETA. Every build bumps `version` in `package.json`
   and adds a `CHANGELOG.md` entry; the masthead shows `BETA · v<version>` (served
   from `/api/version`).
+- **Delivery:** the user runs the app on a Mac from a downloaded zip. Every time a
+  new build zip is sent, ALSO restate the Terminal run steps (stop → `unzip -o
+  ~/Downloads/praixis.zip -d ~/Downloads/praixis` → `cd` + `node server/index.js`
+  → hard-refresh). `unzip -o` in place preserves their `data/`.
 - Match the existing terse code idiom (small helpers, early returns).
 - Do **not** put the model identifier or internal session info in commits,
   code, or pushed artifacts.
