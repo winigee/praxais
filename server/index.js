@@ -282,6 +282,8 @@ async function api(req, res, pathname, query) {
     }
     if (!r[1] && method === 'POST') {
       const b = await readBody(req);
+      // A matter cannot exist without a client on file.
+      if (!b.clientId || !db.get('clients', b.clientId)) return sendJson(res, 400, { error: 'A matter must be linked to a client. Create or select the client first.' });
       // The creator is granted access so they can see what they just opened.
       const acl = Array.from(new Set([...(b.access || []), me?.id].filter(Boolean)));
       const m = db.insert('matters', { status: 'open', parties: [], tags: [], ...b, access: acl });

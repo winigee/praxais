@@ -488,24 +488,56 @@ async function showNewMatter() {
   const ref = el('input', { placeholder: 'Reference (optional)' });
   const area = el('input', { placeholder: 'Practice area' });
   const att = el('input', { placeholder: 'Responsible attorney' });
-  const clientSel = el('select', {}, el('option', { value: '' }, '— existing client —'), ...clients.map((c) => el('option', { value: c.id }, c.name)));
-  const newClient = el('input', { placeholder: 'or new client name' });
   const desc = el('textarea', { rows: '3', placeholder: 'Description' });
+
+  // Every matter must belong to a client: either pick an existing one, or fill
+  // in a proper new client record. No free-floating "client name" shortcut.
+  const clientSel = el('select', {}, el('option', { value: '' }, '— select a client —'), ...clients.map((c) => el('option', { value: c.id }, `${c.name} (${c.type})`)));
+  const ncName = el('input', { placeholder: 'Client full name' });
+  const ncType = el('select', {}, el('option', { value: 'individual' }, 'Individual'), el('option', { value: 'organization' }, 'Organization'));
+  const ncEmail = el('input', { placeholder: 'Email' });
+  const ncPhone = el('input', { placeholder: 'Phone' });
+  const ncAddr = el('input', { placeholder: 'Address' });
+
+  const existingBlock = el('label', { class: 'field' }, el('span', {}, 'Existing client'), clientSel);
+  const newBlock = el('div', { class: 'card', style: 'background:var(--panel-2);padding:12px' },
+    el('label', { class: 'field' }, el('span', {}, 'Client name *'), ncName),
+    el('div', { class: 'grid-2' }, el('label', { class: 'field' }, el('span', {}, 'Type'), ncType), el('label', { class: 'field' }, el('span', {}, 'Email'), ncEmail)),
+    el('div', { class: 'grid-2' }, el('label', { class: 'field' }, el('span', {}, 'Phone'), ncPhone), el('label', { class: 'field' }, el('span', {}, 'Address'), ncAddr)));
+
+  const mode = el('select', {},
+    el('option', { value: 'existing' }, 'Use an existing client'),
+    el('option', { value: 'new' }, 'Create a new client'));
+  const applyMode = () => { const isNew = mode.value === 'new'; newBlock.style.display = isNew ? '' : 'none'; existingBlock.style.display = isNew ? 'none' : ''; };
+  mode.addEventListener('change', applyMode);
+  if (!clients.length) mode.value = 'new'; // nothing to pick yet → force creation
+
   const overlay = modal('New matter', el('div', {},
-    el('label', { class: 'field' }, el('span', {}, 'Title'), title),
+    el('label', { class: 'field' }, el('span', {}, 'Title *'), title),
     el('div', { class: 'grid-2' }, el('label', { class: 'field' }, el('span', {}, 'Reference'), ref), el('label', { class: 'field' }, el('span', {}, 'Practice area'), area)),
-    el('div', { class: 'grid-2' }, el('label', { class: 'field' }, el('span', {}, 'Client'), clientSel), el('label', { class: 'field' }, el('span', {}, 'New client'), newClient)),
+    el('label', { class: 'field' }, el('span', {}, 'Client *'), mode),
+    existingBlock, newBlock,
     el('label', { class: 'field' }, el('span', {}, 'Attorney'), att),
     el('label', { class: 'field' }, el('span', {}, 'Description'), desc),
     el('div', { class: 'btn-row' }, el('button', {
       class: 'btn primary', onclick: async () => {
-        if (!title.value.trim()) return toast('Title required.');
-        let clientId = clientSel.value;
-        if (!clientId && newClient.value.trim()) { const c = await api.post('/clients', { name: newClient.value.trim(), type: 'individual' }); clientId = c.id; }
-        const m = await api.post('/matters', { title: title.value, reference: ref.value, practiceArea: area.value, responsibleAttorney: att.value, clientId, description: desc.value });
-        overlay.remove(); toast('Matter created.'); state.matterId = m.id; render();
+        if (!title.value.trim()) return toast('Matter title is required.');
+        let clientId;
+        try {
+          if (mode.value === 'new') {
+            if (!ncName.value.trim()) return toast('A new client needs a name.');
+            const c = await api.post('/clients', { name: ncName.value.trim(), type: ncType.value, email: ncEmail.value.trim(), phone: ncPhone.value.trim(), address: ncAddr.value.trim() });
+            clientId = c.id;
+          } else {
+            if (!clientSel.value) return toast('Select a client, or switch to “Create a new client”.');
+            clientId = clientSel.value;
+          }
+          const m = await api.post('/matters', { title: title.value, reference: ref.value, practiceArea: area.value, responsibleAttorney: att.value, clientId, description: desc.value });
+          overlay.remove(); toast('Matter created.'); state.view = 'matters'; state.matterId = m.id; render();
+        } catch (e) { toast('Error: ' + e.message); }
       },
-    }, 'Create'))));
+    }, 'Create matter'))));
+  applyMode();
 }
 
 function showNewIntake() {
