@@ -8,6 +8,15 @@ function seed({ force = false } = {}) {
   if (!force && db.all('matters').length > 0) return false;
   if (force) db.reset();
 
+  // Firm staff. Roles drive matter-level access: admins (partners) see every
+  // matter; attorneys/staff see only matters they're responsible for or granted.
+  const helena = db.insert('users', { name: 'Helena Ross', role: 'admin', title: 'Managing Partner', email: 'h.ross@firm.example' });
+  const sarah = db.insert('users', { name: 'Sarah Okonkwo', role: 'attorney', title: 'Senior Associate', email: 's.okonkwo@firm.example' });
+  const david = db.insert('users', { name: 'David Mensah', role: 'attorney', title: 'Associate', email: 'd.mensah@firm.example' });
+  const tom = db.insert('users', { name: 'Tom Reed', role: 'staff', title: 'Paralegal', email: 't.reed@firm.example' });
+  // Open the app as the managing partner (sees everything) by default.
+  db.setSetting('currentUserId', helena.id);
+
   const acme = db.insert('clients', {
     name: 'Acme Robotics Ltd', type: 'organization',
     email: 'legal@acmerobotics.example', phone: '+1 415 555 0142',
@@ -33,7 +42,7 @@ function seed({ force = false } = {}) {
       { name: 'Nexus Components Inc', role: 'Defendant', type: 'organization' },
       { name: 'Dr Alan Pierce', role: 'Expert witness (engineering)', type: 'individual' },
     ],
-    tags: ['litigation', 'contract'],
+    tags: ['litigation', 'contract'], access: [sarah.id, tom.id],
   });
   const m2 = db.insert('matters', {
     title: 'Whitcombe — residential conveyancing, 14 Elm Crescent',
@@ -41,14 +50,14 @@ function seed({ force = false } = {}) {
     status: 'open', responsibleAttorney: 'David Mensah',
     description: 'Purchase of freehold residential property. Exchange targeted for next month.',
     parties: [{ name: 'Hartwell & Co Estate Agents', role: 'Seller agent', type: 'organization' }],
-    tags: ['conveyancing'],
+    tags: ['conveyancing'], access: [david.id],
   });
   const m3 = db.insert('matters', {
     title: 'Meridian — commercial lease renegotiation (Tower 9)',
     reference: 'M-100250', clientId: meridian.id, practiceArea: 'Real Estate',
     status: 'pending', responsibleAttorney: 'Sarah Okonkwo',
     description: 'Renegotiating anchor-tenant lease terms ahead of a 2027 break clause.',
-    parties: [], tags: ['commercial', 'lease'],
+    parties: [], tags: ['commercial', 'lease'], access: [sarah.id],
   });
 
   db.insert('documents', {

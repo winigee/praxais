@@ -42,6 +42,21 @@ body {
 #crumb { font-size: 16px; font-weight: 600; }
 .ask-btn { background: var(--accent); color: #06281f; border: none; padding: 8px 16px; border-radius: 8px; font-weight: 600; cursor: pointer; }
 .ask-btn:hover { filter: brightness(1.1); }
+.topbar-tools { display: flex; align-items: center; gap: 12px; }
+.search-wrap { position: relative; }
+#global-search { width: 280px; max-width: 36vw; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 8px; font-size: 13px; }
+#global-search:focus { outline: none; border-color: var(--accent-dim); }
+.search-results { position: absolute; top: calc(100% + 6px); left: 0; width: 380px; max-width: 70vw; max-height: 60vh; overflow: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,.5); z-index: 150; display: none; }
+.search-results.show { display: block; }
+.search-row { display: block; padding: 9px 12px; border-bottom: 1px solid var(--border); cursor: pointer; }
+.search-row:last-child { border-bottom: none; }
+.search-row:hover { background: var(--panel-2); }
+.search-row .sr-label { font-size: 13px; color: var(--text); }
+.search-row .sr-sub { font-size: 11px; color: var(--muted); }
+.search-row .sr-type { display: inline-block; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--accent); margin-right: 6px; }
+.search-empty { padding: 12px; color: var(--muted); font-size: 13px; }
+.user-switch { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 8px 10px; border-radius: 8px; font-size: 13px; cursor: pointer; max-width: 200px; }
+.user-switch:focus { outline: none; border-color: var(--accent-dim); }
 #view { padding: 24px; overflow-y: auto; flex: 1; }
 
 /* Generic */

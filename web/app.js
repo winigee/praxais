@@ -499,12 +499,63 @@ async function render() {
   } catch (e) { host.innerHTML = ''; host.append(el('div', { class: 'empty' }, 'Error: ' + e.message)); }
 }
 
+// --- acting user (stand-in for login) --------------------------------------
+async function initUserSwitch() {
+  const sel = $('#user-switch');
+  try {
+    const [users, me] = await Promise.all([api.get('/users'), api.get('/me')]);
+    sel.innerHTML = '';
+    for (const u of users) sel.append(el('option', { value: u.id, selected: me && u.id === me.id ? '' : null }, `${u.name} · ${u.title || u.role}`));
+    sel.onchange = async () => {
+      await api.post('/session', { userId: sel.value });
+      state.matterId = null; setAssistantContext(null); state.chat = [];
+      const name = sel.options[sel.selectedIndex].textContent.split(' · ')[0];
+      toast(`Now acting as ${name}`);
+      render();
+    };
+  } catch (_) { sel.style.display = 'none'; }
+}
+
+// --- global search ----------------------------------------------------------
+function initSearch() {
+  const input = $('#global-search');
+  const box = $('#search-results');
+  const hide = () => box.classList.remove('show');
+  let t = null;
+  input.addEventListener('input', () => {
+    clearTimeout(t);
+    const q = input.value.trim();
+    if (!q) return hide();
+    t = setTimeout(async () => {
+      try {
+        const { results } = await api.get('/search?q=' + encodeURIComponent(q));
+        box.innerHTML = '';
+        if (!results.length) { box.append(el('div', { class: 'search-empty' }, 'No matches.')); }
+        else for (const r of results) {
+          box.append(el('div', { class: 'search-row', onclick: () => { hide(); input.value = ''; gotoMatter(r.matterId); } },
+            el('div', { class: 'sr-label' }, el('span', { class: 'sr-type' }, r.type), r.label),
+            el('div', { class: 'sr-sub' }, r.sub || '')));
+        }
+        box.classList.add('show');
+      } catch (e) { box.innerHTML = ''; box.append(el('div', { class: 'search-empty' }, 'Error: ' + e.message)); box.classList.add('show'); }
+    }, 180);
+  });
+  input.addEventListener('keydown', (e) => { if (e.key === 'Escape') { input.value = ''; hide(); } });
+  document.addEventListener('click', (e) => { if (!e.target.closest('.search-wrap')) hide(); });
+}
+function gotoMatter(id) {
+  if (!id) return;
+  state.view = 'matters'; state.matterId = id; setNav(); render();
+}
+
 async function init() {
   document.querySelectorAll('.nav-btn').forEach((b) => b.addEventListener('click', () => { state.view = b.dataset.view; if (b.dataset.view !== 'matters') state.matterId = null; render(); }));
   $('#ask-bones').addEventListener('click', openAssistant);
   $('#assistant-close').addEventListener('click', closeAssistant);
   $('#chat-form').addEventListener('submit', sendChat);
   $('#chat-input').addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') sendChat(e); });
+  initSearch();
+  await initUserSwitch();
 
   try {
     const s = await api.get('/ai/status');

@@ -10,6 +10,7 @@ const DATA_DIR = path.join(__dirname, '..', 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 
 const COLLECTIONS = [
+  'users',      // firm staff + their role (basis for matter-level access)
   'clients',
   'matters',
   'documents',

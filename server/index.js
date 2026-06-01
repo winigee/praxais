@@ -12,6 +12,7 @@ const { seed } = require('./seed');
 const agents = require('./ai/agents');
 const bones = require('./ai/bones');
 const watcher = require('./integrations/thewatcher');
+const access = require('./access');
 
 // Resolve TheWatcher's URL: runtime setting wins, then env, then unset.
 function watcherUrl() {
@@ -68,9 +69,13 @@ function serveStatic(req, res, pathname) {
 }
 
 // --- dashboard summary ------------------------------------------------------
+// Everything matter-derived is scoped to what the acting user may see.
 function buildState() {
-  const matters = db.all('matters');
-  const events = db.all('events');
+  const user = access.currentUser();
+  const matters = access.visibleMatters(user);
+  const visibleIds = new Set(matters.map((m) => m.id));
+  const clientIds = new Set(matters.map((m) => m.clientId).filter(Boolean));
+  const events = db.where('events', (e) => visibleIds.has(e.matterId));
   const today = new Date().toISOString().slice(0, 10);
   const in7 = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
   const upcoming = events
@@ -78,17 +83,18 @@ function buildState() {
     .sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate)));
   return {
     ai: { available: bones.available() },
+    user: user && { id: user.id, name: user.name, role: user.role, title: user.title },
     counts: {
       matters: matters.length,
       openMatters: matters.filter((m) => m.status === 'open').length,
-      clients: db.all('clients').length,
-      documents: db.all('documents').length,
+      clients: clientIds.size,
+      documents: db.where('documents', (d) => visibleIds.has(d.matterId)).length,
       newIntake: db.all('intake').filter((i) => i.status === 'new').length,
       overdue: upcoming.filter((e) => e.dueDate < today).length,
       dueThisWeek: upcoming.filter((e) => e.dueDate >= today && e.dueDate <= in7).length,
     },
     upcoming: upcoming.slice(0, 8).map((e) => ({ ...e, matter: db.get('matters', e.matterId)?.title })),
-    recentActivity: db.all('activity').slice(-12).reverse(),
+    recentActivity: db.all('activity').filter((a) => !a.matterId || visibleIds.has(a.matterId)).slice(-12).reverse(),
   };
 }
 
@@ -105,11 +111,51 @@ function matterDetail(id) {
   };
 }
 
+// --- global search ----------------------------------------------------------
+// Sweeps matters + their documents, notes, deadlines, and clients — but only
+// across matters the acting user may see, so confidentiality holds in search.
+function search(q) {
+  const term = String(q).trim().toLowerCase();
+  if (!term) return { query: '', results: [] };
+  const user = access.currentUser();
+  const matters = access.visibleMatters(user);
+  const visibleIds = new Set(matters.map((m) => m.id));
+  const hit = (s) => s && String(s).toLowerCase().includes(term);
+  const out = [];
+
+  for (const m of matters) {
+    if (hit(m.title) || hit(m.reference) || hit(m.practiceArea) || hit(m.description) || (m.parties || []).some((p) => hit(p.name)))
+      out.push({ type: 'matter', id: m.id, matterId: m.id, label: m.title, sub: `${m.reference || m.id} · ${m.practiceArea || '—'}` });
+  }
+  for (const c of db.all('clients')) {
+    // Only surface a client if they're attached to a matter the user can see.
+    const theirMatter = matters.find((m) => m.clientId === c.id);
+    if (theirMatter && (hit(c.name) || hit(c.email)))
+      out.push({ type: 'client', id: c.id, matterId: theirMatter.id, label: c.name, sub: `Client · ${c.type}` });
+  }
+  for (const d of db.where('documents', (x) => visibleIds.has(x.matterId))) {
+    if (hit(d.name) || hit(d.content))
+      out.push({ type: 'document', id: d.id, matterId: d.matterId, label: d.name, sub: `Document · ${db.get('matters', d.matterId)?.reference || ''}` });
+  }
+  for (const n of db.where('notes', (x) => visibleIds.has(x.matterId))) {
+    if (hit(n.body)) out.push({ type: 'note', id: n.id, matterId: n.matterId, label: n.body.slice(0, 80), sub: `Note · ${db.get('matters', n.matterId)?.reference || ''}` });
+  }
+  for (const e of db.where('events', (x) => visibleIds.has(x.matterId))) {
+    if (hit(e.title)) out.push({ type: 'event', id: e.id, matterId: e.matterId, label: e.title, sub: `Deadline ${e.dueDate || ''} · ${db.get('matters', e.matterId)?.reference || ''}` });
+  }
+  return { query: q, results: out.slice(0, 30) };
+}
+
 // --- streaming chat (SSE over POST) -----------------------------------------
 async function handleChat(req, res, body) {
+  const { matterId, messages = [], protect = true, model } = body;
+  // Don't let the assistant reason over a matter the user can't see.
+  if (matterId) {
+    const m = db.get('matters', matterId);
+    if (m && !access.canSeeMatter(access.currentUser(), m)) return sendJson(res, 403, { error: 'no access to this matter' });
+  }
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
   const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-  const { matterId, messages = [], protect = true, model } = body;
   const system = agents.assistantSystem(matterId);
 
   try {
@@ -170,6 +216,20 @@ async function api(req, res, pathname, query) {
   if (r[0] === 'ai' && r[1] === 'status' && method === 'GET')
     return sendJson(res, 200, { available: bones.available(), templates: agents.DRAFT_TEMPLATES, models: bones.MODELS });
 
+  // Users + "acting as" session (stand-in for login until accounts land)
+  if (r[0] === 'users' && method === 'GET') return sendJson(res, 200, db.all('users'));
+  if (r[0] === 'me' && method === 'GET') return sendJson(res, 200, access.currentUser());
+  if (r[0] === 'session' && method === 'POST') {
+    const b = await readBody(req);
+    const u = b.userId && db.get('users', b.userId);
+    if (!u) return sendJson(res, 400, { error: 'unknown user' });
+    db.setSetting('currentUserId', u.id);
+    return sendJson(res, 200, u);
+  }
+
+  // Global search — scoped to matters the acting user may see.
+  if (r[0] === 'search' && method === 'GET') return sendJson(res, 200, search(query.q || ''));
+
   // Clients
   if (r[0] === 'clients') {
     if (method === 'GET') return sendJson(res, 200, db.all('clients'));
@@ -178,11 +238,25 @@ async function api(req, res, pathname, query) {
 
   // Matters
   if (r[0] === 'matters') {
+    const me = access.currentUser();
     if (!r[1] && method === 'GET') {
-      const list = db.all('matters').map((m) => ({ ...m, client: db.get('clients', m.clientId)?.name }));
+      const list = access.visibleMatters(me).map((m) => ({ ...m, client: db.get('clients', m.clientId)?.name }));
       return sendJson(res, 200, list);
     }
-    if (!r[1] && method === 'POST') { const b = await readBody(req); const m = db.insert('matters', { status: 'open', parties: [], tags: [], ...b }); db.logActivity({ actor: 'user', action: 'created-matter', matterId: m.id, detail: m.title }); return sendJson(res, 201, m); }
+    if (!r[1] && method === 'POST') {
+      const b = await readBody(req);
+      // The creator is granted access so they can see what they just opened.
+      const acl = Array.from(new Set([...(b.access || []), me?.id].filter(Boolean)));
+      const m = db.insert('matters', { status: 'open', parties: [], tags: [], ...b, access: acl });
+      db.logActivity({ actor: me?.name || 'user', action: 'created-matter', matterId: m.id, detail: m.title });
+      return sendJson(res, 201, m);
+    }
+    // Reads/writes of a specific matter are gated on access.
+    if (r[1]) {
+      const m0 = db.get('matters', r[1]);
+      if (!m0) return sendJson(res, 404, { error: 'not found' });
+      if (!access.canSeeMatter(me, m0)) return sendJson(res, 403, { error: 'no access to this matter' });
+    }
     if (r[1] && method === 'GET') { const d = matterDetail(r[1]); return d ? sendJson(res, 200, d) : sendJson(res, 404, { error: 'not found' }); }
     if (r[1] && method === 'PATCH') { const b = await readBody(req); const m = db.update('matters', r[1], b); return m ? sendJson(res, 200, m) : sendJson(res, 404, { error: 'not found' }); }
     if (r[1] && method === 'DELETE') {
@@ -306,13 +380,17 @@ async function api(req, res, pathname, query) {
 
   // --- AI agent endpoints ---
   if (r[0] === 'ai') {
+    // Agents must not operate on a matter the acting user can't see.
+    const matterDenied = (mid) => { if (!mid) return false; const m = db.get('matters', mid); return m && !access.canSeeMatter(access.currentUser(), m); };
     if (r[1] === 'draft' && method === 'POST') {
       const b = await readBody(req);
+      if (matterDenied(b.matterId)) return sendJson(res, 403, { error: 'no access to this matter' });
       try { return sendJson(res, 200, await agents.draftDocument(b)); }
       catch (e) { return sendJson(res, 400, { error: e.message }); }
     }
     if (r[1] === 'extract-deadlines' && method === 'POST') {
       const b = await readBody(req);
+      if (matterDenied(b.matterId)) return sendJson(res, 403, { error: 'no access to this matter' });
       try {
         let text = b.text;
         if (!text && b.documentId) text = db.get('documents', b.documentId)?.content || '';

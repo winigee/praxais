@@ -48,6 +48,12 @@ data/             db.json — gitignored, created at runtime
 
 - **Matters** are the backbone. Clients, documents, events (deadlines/hearings),
   notes, and time entries all hang off a `matterId`.
+- **Matter-level access (`server/access.js`)** is the one place that decides who
+  can see a matter: admins see all; others need to be on the matter's `access`
+  list or be its responsible attorney. The matters list, dashboard, **global
+  search**, and the **AI agents** all gate through this, so confidentiality holds
+  everywhere. The "acting" user is a single setting (`currentUserId`) chosen in
+  the header — a stand-in until real login/accounts land.
 - **Four agents** (`server/ai/agents.js`):
   - `agent:drafter` — drafts documents from matter context.
   - `agent:docket` — extracts dates/deadlines from text (computes relative ones).

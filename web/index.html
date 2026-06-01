@@ -35,7 +35,14 @@
     <main id="main">
       <header id="topbar">
         <div id="crumb">Dashboard</div>
-        <button id="ask-bones" class="ask-btn">🦴 Ask BonesAI</button>
+        <div class="topbar-tools">
+          <div class="search-wrap">
+            <input id="global-search" type="search" placeholder="🔍 Search matters, documents, notes…" autocomplete="off" />
+            <div id="search-results" class="search-results"></div>
+          </div>
+          <select id="user-switch" class="user-switch" title="Acting as — switch user to see matter-level access in action"></select>
+          <button id="ask-bones" class="ask-btn">🦴 Ask BonesAI</button>
+        </div>
       </header>
       <section id="view"></section>
     </main>
