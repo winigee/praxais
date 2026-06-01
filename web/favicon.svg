@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Praixis">
+  <defs>
+    <linearGradient id="praxTile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1b2230"/>
+      <stop offset="1" stop-color="#0d1117"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#praxTile)" stroke="#2a3140" stroke-width="2"/>
+  <path d="M72 176 L128 146 L184 176" fill="none" stroke="#14746b" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M72 138 L128 108 L184 138" fill="none" stroke="#2dd4bf" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M72 100 L128 70 L184 100" fill="none" stroke="#7ef0e0" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
