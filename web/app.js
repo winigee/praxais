@@ -203,6 +203,53 @@ views.docket = async () => {
   return el('div', {}, el('h2', {}, '📅 Docket & Deadlines'), el('div', { class: 'grid-2' }, extractor, calendar));
 };
 
+views.calendar = async () => {
+  const events = await api.get('/events');
+  const byDay = {};
+  for (const e of events) { if (e.dueDate) (byDay[e.dueDate] = byDay[e.dueDate] || []).push(e); }
+
+  if (!state.calMonth) state.calMonth = new Date(); // first of currently shown month tracked by year/mon
+  const cur = new Date(state.calMonth.getFullYear(), state.calMonth.getMonth(), 1);
+  const monthName = cur.toLocaleString('en', { month: 'long', year: 'numeric' });
+  const today = new Date().toISOString().slice(0, 10);
+
+  const setMonth = (delta) => { state.calMonth = new Date(cur.getFullYear(), cur.getMonth() + delta, 1); render(); };
+
+  const head = el('div', { class: 'section-head' },
+    el('div', { class: 'cal-nav' },
+      el('button', { class: 'btn', onclick: () => setMonth(-1) }, '‹'),
+      el('h2', { style: 'margin:0;min-width:200px;text-align:center' }, monthName),
+      el('button', { class: 'btn', onclick: () => setMonth(1) }, '›'),
+      el('button', { class: 'btn', onclick: () => { state.calMonth = new Date(); render(); } }, 'Today')),
+    el('a', { class: 'btn primary', href: '/api/events/export.ics', download: 'praixis-deadlines.ics' }, '📤 Export to calendar (.ics)'),
+  );
+
+  // grid: weekday headers + leading blanks + days
+  const dow = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const grid = el('div', { class: 'cal-grid' }, ...dow.map((d) => el('div', { class: 'cal-dow' }, d)));
+  const firstDow = (cur.getDay() + 6) % 7; // Monday-start
+  const daysInMonth = new Date(cur.getFullYear(), cur.getMonth() + 1, 0).getDate();
+  for (let i = 0; i < firstDow; i++) grid.append(el('div', { class: 'cal-cell empty' }));
+  for (let d = 1; d <= daysInMonth; d++) {
+    const iso = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const evs = byDay[iso] || [];
+    const cell = el('div', { class: 'cal-cell' + (iso === today ? ' is-today' : '') },
+      el('div', { class: 'cal-date' }, String(d)),
+      ...evs.slice(0, 4).map((e) => el('div', {
+        class: `cal-event ${e.priority || 'normal'}` + (e.status === 'done' ? ' done' : iso < today ? ' overdue' : ''),
+        title: `${e.title} — ${e.matter || ''}`,
+        onclick: () => gotoMatter(e.matterId),
+      }, e.title)),
+      evs.length > 4 ? el('div', { class: 'muted', style: 'font-size:11px' }, `+${evs.length - 4} more`) : null,
+    );
+    grid.append(cell);
+  }
+
+  return el('div', {}, head,
+    el('p', { class: 'muted' }, 'Deadlines and hearings across the matters you can access. The export drops them into Apple/Outlook/Google Calendar, each with a reminder the day before.'),
+    el('div', { class: 'card' }, grid));
+};
+
 views.intake = async () => {
   const items = await api.get('/intake');
   const head = el('div', { class: 'section-head' }, el('h2', {}, '📨 Intake & Triage'),
@@ -531,7 +578,7 @@ async function sendChat(e) {
 // --- shell ------------------------------------------------------------------
 function setNav() {
   document.querySelectorAll('.nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.view === state.view));
-  $('#crumb').textContent = { dashboard: 'Dashboard', matters: 'Matters', drafting: 'Drafting', docket: 'Docket & Deadlines', intake: 'Intake', conflicts: 'Conflict Check', time: 'Time & Billing', activity: 'Activity' }[state.view] || state.view;
+  $('#crumb').textContent = { dashboard: 'Dashboard', matters: 'Matters', drafting: 'Drafting', docket: 'Docket & Deadlines', calendar: 'Calendar', intake: 'Intake', conflicts: 'Conflict Check', time: 'Time & Billing', activity: 'Activity' }[state.view] || state.view;
 }
 async function render() {
   if (state._tick) { clearInterval(state._tick); state._tick = null; }

@@ -147,6 +147,36 @@ function search(q) {
   return { query: q, results: out.slice(0, 30) };
 }
 
+// --- iCalendar export -------------------------------------------------------
+// Builds a VCALENDAR of all-day deadline events with a 1-day-before reminder,
+// importable into Apple/Outlook/Google Calendar. Zero dependencies.
+function buildICS(events) {
+  const esc = (s) => String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  const dateOnly = (d) => String(d).replace(/-/g, '').slice(0, 8);
+  const nextDay = (d) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + 1); return x.toISOString().slice(0, 10).replace(/-/g, ''); };
+  const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Praixis//Deadlines//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'X-WR-CALNAME:Praixis deadlines'];
+  for (const e of events) {
+    const matter = db.get('matters', e.matterId);
+    const summary = `${e.title}${matter?.reference ? ` (${matter.reference})` : ''}`;
+    const desc = [matter?.title, e.type ? `Type: ${e.type}` : null, e.priority ? `Priority: ${e.priority}` : null, e.rationale].filter(Boolean).join(' — ');
+    lines.push(
+      'BEGIN:VEVENT',
+      `UID:${e.id}@praixis`,
+      `DTSTAMP:${stamp}`,
+      `DTSTART;VALUE=DATE:${dateOnly(e.dueDate)}`,
+      `DTEND;VALUE=DATE:${nextDay(e.dueDate)}`,
+      `SUMMARY:${esc(summary)}`,
+      `DESCRIPTION:${esc(desc)}`,
+      e.priority === 'high' ? 'PRIORITY:1' : 'PRIORITY:5',
+      'BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${esc('Reminder: ' + summary)}`, 'TRIGGER:-P1D', 'END:VALARM',
+      'END:VEVENT',
+    );
+  }
+  lines.push('END:VCALENDAR');
+  return lines.join('\r\n');
+}
+
 // --- streaming chat (SSE over POST) -----------------------------------------
 async function handleChat(req, res, body) {
   const { matterId, messages = [], protect = true, model } = body;
@@ -288,9 +318,20 @@ async function api(req, res, pathname, query) {
 
   // Events / deadlines
   if (r[0] === 'events') {
+    const me = access.currentUser();
+    const visible = access.visibleMatterIdSet(me);
+    // Calendar export (.ics) — visible deadlines, with a day-before reminder.
+    if (r[1] === 'export.ics' && method === 'GET') {
+      let list = db.where('events', (e) => visible.has(e.matterId) && e.dueDate && e.status !== 'done');
+      if (query.matterId) list = list.filter((e) => e.matterId === query.matterId);
+      const ics = buildICS(list);
+      res.writeHead(200, { 'content-type': 'text/calendar; charset=utf-8', 'content-disposition': 'attachment; filename="praixis-deadlines.ics"' });
+      return res.end(ics);
+    }
     if (!r[1] && method === 'GET') {
       let list = query.matterId ? db.where('events', (e) => e.matterId === query.matterId) : db.all('events');
-      list = list.map((e) => ({ ...e, matter: db.get('matters', e.matterId)?.title }))
+      list = list.filter((e) => visible.has(e.matterId))
+        .map((e) => ({ ...e, matter: db.get('matters', e.matterId)?.title }))
         .sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate)));
       return sendJson(res, 200, list);
     }
