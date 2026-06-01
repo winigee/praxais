@@ -185,6 +185,17 @@ async function api(req, res, pathname, query) {
     if (!r[1] && method === 'POST') { const b = await readBody(req); const m = db.insert('matters', { status: 'open', parties: [], tags: [], ...b }); db.logActivity({ actor: 'user', action: 'created-matter', matterId: m.id, detail: m.title }); return sendJson(res, 201, m); }
     if (r[1] && method === 'GET') { const d = matterDetail(r[1]); return d ? sendJson(res, 200, d) : sendJson(res, 404, { error: 'not found' }); }
     if (r[1] && method === 'PATCH') { const b = await readBody(req); const m = db.update('matters', r[1], b); return m ? sendJson(res, 200, m) : sendJson(res, 404, { error: 'not found' }); }
+    if (r[1] && method === 'DELETE') {
+      const m = db.get('matters', r[1]);
+      if (!m) return sendJson(res, 404, { error: 'not found' });
+      // Cascade: drop everything that hangs off the matter so nothing orphans.
+      for (const c of ['documents', 'events', 'notes', 'timeEntries']) {
+        for (const row of db.where(c, (x) => x.matterId === r[1])) db.remove(c, row.id);
+      }
+      db.remove('matters', r[1]);
+      db.logActivity({ actor: 'user', action: 'deleted-matter', detail: m.title });
+      return sendJson(res, 200, { ok: true });
+    }
   }
 
   // Documents

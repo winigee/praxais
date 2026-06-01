@@ -97,6 +97,11 @@ async function matterDetail(id) {
         try { await api.post('/watcher/timers/start', { matterId: id, attorney: m.responsibleAttorney, description: m.title }); toast('Timer started in TheWatcher.'); state.view = 'time'; setNav(); render(); }
         catch (e) { toast(e.message.includes('unreachable') || e.message.includes('configured') ? 'Connect TheWatcher in the Time tab first.' : 'Error: ' + e.message); }
       } }, '⏱️ Start timer'),
+      el('button', { class: 'btn danger', style: 'margin-left:auto', onclick: async () => {
+        if (!confirm(`Delete "${m.title}"?\n\nThis also removes its documents, deadlines, notes and time entries. This cannot be undone.`)) return;
+        try { await api.del('/matters/' + id); toast('Matter deleted.'); state.matterId = null; setAssistantContext(null); render(); }
+        catch (e) { toast('Error: ' + e.message); }
+      } }, '🗑 Delete matter'),
     ),
   );
 
