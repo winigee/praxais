@@ -5,9 +5,20 @@ const db = require('./db');
 
 function seed({ force = false } = {}) {
   db.load();
-  if (!force && db.all('matters').length > 0) return false;
+  if (!force && db.exportDb().matters.length > 0) return false;
   if (force) db.reset();
 
+  // The subscribing firm (tenant). Everything below is filed under it, and the
+  // app acts as this firm by default (a stand-in for auth/subdomain routing).
+  const firm = db.insert('tenants', { name: 'Northwind Legal LLP', plan: 'demo', region: 'uk' });
+  db.setPlatformSetting('currentTenantId', firm.id);
+
+  return db.withTenant(firm.id, () => seedFirm());
+}
+
+// All demo records for one firm — runs inside that firm's tenant context, so
+// every insert is stamped with its tenantId automatically.
+function seedFirm() {
   // Firm staff. Roles drive matter-level access: admins (partners) see every
   // matter; attorneys/staff see only matters they're responsible for or granted.
   const helena = db.insert('users', { name: 'Helena Ross', role: 'admin', title: 'Managing Partner', email: 'h.ross@firm.example' });

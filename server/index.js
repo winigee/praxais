@@ -295,7 +295,10 @@ async function api(req, res, pathname, query) {
     return sendJson(res, 200, u);
   }
 
-  // Data backup / restore / reset — admin only.
+  // Data backup / restore / reset — admin only. NOTE: these act on the WHOLE
+  // database (all tenants), which is safe only while a deployment holds one
+  // firm. Before onboarding a second firm these MUST become per-tenant export /
+  // restore / erase so one firm's admin can never read or wipe another's data.
   if (['backup', 'restore', 'reset'].includes(r[0])) {
     const me = access.currentUser();
     if (me && me.role !== 'admin') return sendJson(res, 403, { error: 'admin only' });
@@ -532,17 +535,39 @@ async function api(req, res, pathname, query) {
   return sendJson(res, 404, { error: `no route: ${method} ${pathname}` });
 }
 
+// Which firm (tenant) is this request acting as? Until real auth/subdomain
+// routing lands this resolves from an explicit header, else the platform's
+// "acting tenant" setting, else the only tenant. Everything downstream runs
+// inside this firm's context, so the store can't serve another firm's data.
+function resolveTenantId(req) {
+  return db.asPlatform(() => {
+    const tenants = db.all('tenants');
+    const hdr = req.headers['x-praixis-tenant'];
+    if (hdr && tenants.some((t) => t.id === hdr)) return hdr;
+    const set = db.getPlatformSetting('currentTenantId', null);
+    if (set && tenants.some((t) => t.id === set)) return set;
+    return tenants[0] ? tenants[0].id : null;
+  });
+}
+
 const server = http.createServer((req, res) => {
   const parsed = url.parse(req.url, true);
   const pathname = parsed.pathname;
   if (pathname.startsWith('/api/')) {
-    api(req, res, pathname, parsed.query).catch((e) => { console.error(e); if (!res.headersSent) sendJson(res, 500, { error: e.message }); });
+    const tid = resolveTenantId(req);
+    // A resolved tenant → scope the whole request to it. No tenant yet (empty
+    // db before seeding) → platform, mirroring the prototype's "open until
+    // configured" stance.
+    const run = tid ? (fn) => db.withTenant(tid, fn) : (fn) => db.asPlatform(fn);
+    run(() => api(req, res, pathname, parsed.query))
+      .catch((e) => { console.error(e); if (!res.headersSent) sendJson(res, 500, { error: e.message }); });
     return;
   }
   serveStatic(req, res, pathname);
 });
 
 db.load();
+db.migrate();
 seed();
 server.listen(PORT, () => {
   console.log(`\n  Praixis — AI practice management suite  (BETA v${pkg.version})`);
